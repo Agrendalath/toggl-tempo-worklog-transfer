@@ -30,6 +30,7 @@ class TogglTimesheets:
         # create a Toggl object and set our API key
         self.toggl = Toggl()
         self.toggl.setAPIKey(api_key)
+        self.projects = {}
 
     def _get_raw_timelogs(self, start_date=None, end_date=None):
         # Add filters
@@ -40,18 +41,25 @@ class TogglTimesheets:
             params["end_date"] = end_date
 
         # Make request and return
-        return self.toggl.request(
+        result = self.toggl.request(
             Endpoints.TIME_ENTRIES,
             parameters=params
         )
+        self._get_project_names(result)
+        return result
 
     def _get_raw_timelogs_last_n_days(self, n_days):
         last_n_days = datetime.utcnow() - timedelta(days=n_days)
         last_n_days_str = last_n_days.replace(microsecond=0, tzinfo=timezone.utc).isoformat()
         return self._get_raw_timelogs(start_date=last_n_days_str)
 
-    @staticmethod
-    def _parse_timelog(raw):
+    def _get_project_names(self, raw_timelogs):
+        workspaces = {log['wid'] for log in raw_timelogs}
+        for workspace in workspaces:
+            response = self.toggl.getWorkspaceProjects(workspace)
+            self.projects.update({project['id']: project['name'] for project in response})
+
+    def _parse_timelog(self, raw):
         """
         {
             'start': '2019-05-11T12:19:39+00:00',
@@ -85,6 +93,9 @@ class TogglTimesheets:
         if 'description' not in raw:
             # Shouldn't exist, but alas
             raw['description'] = 'NO DESCRIPTION'
+
+        if not ticket:
+            ticket = self.projects.get(raw.get('pid'))
 
         start = datetime.strptime(raw['start'], DATETIME_FORMAT)
         end = datetime.strptime(raw['stop'], DATETIME_FORMAT)
